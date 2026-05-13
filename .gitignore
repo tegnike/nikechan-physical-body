@@ -1,0 +1,9 @@
+.pio/
+.vscode/
+build/
+tmp/
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
