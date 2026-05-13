@@ -699,7 +699,31 @@ bool postAudioToBridge(uint8_t* wav, size_t wavSize) {
   return true;
 }
 
-bool postWakeToBridge(uint8_t* wav, size_t wavSize) {
+bool playAudioUrlFromJson(JsonDocument& doc) {
+  if (doc["commands"].is<JsonArray>()) {
+    applyBodyCommands(doc["commands"].as<JsonArray>());
+  }
+
+  const String audioUrl = normalizeAudioUrl(String(doc["audio_url"] | ""));
+  if (audioUrl.length() == 0) {
+    return false;
+  }
+
+  uint8_t* audio = nullptr;
+  size_t audioSize = 0;
+  if (!downloadAudio(audioUrl, audio, audioSize)) {
+    if (audio) free(audio);
+    lastAction = "audio dl error";
+    return false;
+  }
+  playWavBuffer(audio, audioSize);
+  free(audio);
+  return true;
+}
+
+enum class WakeResult { NotDetected, DetectedOnly, Answered };
+
+WakeResult postWakeToBridge(uint8_t* wav, size_t wavSize) {
   const String boundary = "----NikechanWakeBoundary";
   String head;
   head += "--" + boundary + "\r\n";
@@ -714,7 +738,7 @@ bool postWakeToBridge(uint8_t* wav, size_t wavSize) {
   const size_t bodySize = head.length() + wavSize + fields.length();
   uint8_t* body = static_cast<uint8_t*>(heap_caps_malloc(bodySize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!body) body = static_cast<uint8_t*>(heap_caps_malloc(bodySize, MALLOC_CAP_8BIT));
-  if (!body) return false;
+  if (!body) return WakeResult::NotDetected;
 
   size_t offset = 0;
   memcpy(body + offset, head.c_str(), head.length());
@@ -726,24 +750,38 @@ bool postWakeToBridge(uint8_t* wav, size_t wavSize) {
   HTTPClient http;
   if (!http.begin(bridgeUrl + "/api/wake")) {
     free(body);
-    return false;
+    return WakeResult::NotDetected;
   }
   http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
   const int code = http.POST(body, bodySize);
   free(body);
   if (code != HTTP_CODE_OK) {
     http.end();
-    return false;
+    return WakeResult::NotDetected;
   }
   const String response = http.getString();
   http.end();
 
   JsonDocument doc;
   if (deserializeJson(doc, response)) {
-    return false;
+    return WakeResult::NotDetected;
   }
   lastTranscript = String(doc["transcript"] | "");
-  return doc["detected"] | false;
+  const bool detected = doc["detected"] | false;
+  if (!detected) {
+    return WakeResult::NotDetected;
+  }
+
+  const String utterance = String(doc["utterance"] | "");
+  const String reply = String(doc["reply"] | "");
+  if (utterance.length() > 0 && reply.length() > 0) {
+    lastReply = reply;
+    lastAction = "wake answered";
+    playAudioUrlFromJson(doc);
+    return WakeResult::Answered;
+  }
+
+  return WakeResult::DetectedOnly;
 }
 
 void startVoiceRoundTrip() {
@@ -820,10 +858,12 @@ void handleWakeMonitor() {
     wakeListening = false;
     return;
   }
-  const bool detected = postWakeToBridge(wav, wavSize);
+  const WakeResult wakeResult = postWakeToBridge(wav, wavSize);
   free(wav);
 
-  if (detected) {
+  if (wakeResult == WakeResult::Answered) {
+    lastAction = "wake answered";
+  } else if (wakeResult == WakeResult::DetectedOnly) {
     lastAction = "wake detected";
     renderFaceView(true);
     startVoiceRoundTrip();

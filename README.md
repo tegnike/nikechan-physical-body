@@ -61,3 +61,5 @@ RoverC Pro は本来 M5StickC/M5StickC PLUS 直挿し用なので、初回は低
 `bridge/` は、CoreS3から音声を受け取り、OpenAIで音声認識・返答生成、Aivis Cloud APIで音声合成を行うMac/サーバー側ブリッジ。
 
 詳細は [docs/body-bridge.md](docs/body-bridge.md) を参照。
+
+物理ボディ全体の仕様は [docs/product-spec.md](docs/product-spec.md) を参照。

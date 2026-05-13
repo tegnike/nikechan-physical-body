@@ -159,8 +159,24 @@ app.post("/api/wake", upload.single("audio"), async (req, res, next) => {
       ? req.body.wake_word.trim()
       : "ニケちゃん";
     const transcript = await transcribeAudio(req.file);
-    const detected = transcript ? await detectWakeWord(transcript, wakeWord) : false;
-    res.json({ transcript, wake_word: wakeWord, detected });
+    const wake = transcript ? await detectWakeWord(transcript, wakeWord) : { detected: false, utterance: "" };
+    let brain = null;
+    let audio = null;
+    if (wake.detected && wake.utterance) {
+      brain = await generateBrainReply(wake.utterance);
+      audio = await synthesizeSpeech(brain.reply, synthesisOptionsFromBody(req.body));
+    }
+    res.json({
+      transcript,
+      wake_word: wakeWord,
+      detected: wake.detected,
+      utterance: wake.utterance,
+      reply: brain?.reply,
+      face: brain?.face,
+      commands: brain?.commands ?? [],
+      audio_url: audio?.url,
+      audio_content_type: audio?.contentType
+    });
   } catch (error) {
     next(error);
   }

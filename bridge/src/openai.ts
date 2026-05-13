@@ -13,6 +13,11 @@ export type BrainReply = {
   commands: BodyCommand[];
 };
 
+export type WakeWordResult = {
+  detected: boolean;
+  utterance: string;
+};
+
 type ResponseOutputItem = {
   type?: string;
   content?: Array<{ type?: string; text?: string }>;
@@ -144,11 +149,21 @@ export async function generateBrainReply(userText: string): Promise<BrainReply> 
   return parseBrainReply(extractResponseText(await res.json()));
 }
 
-export async function detectWakeWord(text: string, wakeWord: string): Promise<boolean> {
+function stripWakeWord(text: string, wakeWord: string): string {
+  const escaped = wakeWord.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const variants = [escaped, "ニケ", "にけちゃん", "ニケチャン", "nikechan"];
+  let result = text;
+  for (const variant of variants) {
+    result = result.replace(new RegExp(`^\\s*(ねえ|ねぇ|おい|はい|OK|ok|ヘイ|hey)?\\s*${variant}[、,。.!！?？\\s]*`, "i"), "");
+  }
+  return result.trim();
+}
+
+export async function detectWakeWord(text: string, wakeWord: string): Promise<WakeWordResult> {
   const normalized = text.replace(/\s/g, "").toLowerCase();
   const target = wakeWord.replace(/\s/g, "").toLowerCase();
   if (normalized.includes(target)) {
-    return true;
+    return { detected: true, utterance: stripWakeWord(text, wakeWord) };
   }
 
   const res = await fetch("https://api.openai.com/v1/responses", {
@@ -173,9 +188,13 @@ export async function detectWakeWord(text: string, wakeWord: string): Promise<bo
           schema: {
             type: "object",
             additionalProperties: false,
-            required: ["detected"],
+            required: ["detected", "utterance"],
             properties: {
-              detected: { type: "boolean" }
+              detected: { type: "boolean" },
+              utterance: {
+                type: "string",
+                description: "呼びかけ語を除いた、ユーザーの実際の依頼。依頼がなければ空文字。"
+              }
             }
           },
           strict: true
@@ -190,8 +209,12 @@ export async function detectWakeWord(text: string, wakeWord: string): Promise<bo
 
   const textOut = extractResponseText(await res.json());
   try {
-    return Boolean(JSON.parse(textOut).detected);
+    const parsed = JSON.parse(textOut) as Partial<WakeWordResult>;
+    return {
+      detected: Boolean(parsed.detected),
+      utterance: typeof parsed.utterance === "string" ? parsed.utterance.trim() : ""
+    };
   } catch {
-    return false;
+    return { detected: false, utterance: "" };
   }
 }

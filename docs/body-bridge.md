@@ -109,7 +109,8 @@ curl -s http://localhost:8787/api/wake \
 {
   "transcript": "ニケちゃん、聞いて",
   "wake_word": "ニケちゃん",
-  "detected": true
+  "detected": true,
+  "utterance": "聞いて"
 }
 ```
 
@@ -124,4 +125,4 @@ curl -s http://localhost:8787/api/wake \
 
 CoreS3ファーム側は、顔の中央タップまたはWeb UIの `Talk` で録音を開始する。固定秒数ではなく、RMS音量で発話開始を検出し、800ms程度の無音継続で話し終わりと判定する。最大録音時間は10秒、発話開始待ちは5秒。CoreS3は音声再生しやすいように `audio_format=wav` と `audio_sampling_rate=16000` を指定してbridgeへ送る。
 
-ウェイクワードモードを有効にすると、CoreS3は短い発話候補を `POST /api/wake` へ送り、`ニケちゃん` と呼ばれた時だけ本会話録音に進む。
+ウェイクワードモードを有効にすると、CoreS3は短い発話候補を `POST /api/wake` へ送る。`ニケちゃん、今日の天気は？` のように呼びかけと質問が同じ録音に含まれていた場合、bridgeは `utterance` を抽出してそのまま返答生成まで行う。`ニケちゃん` だけの場合は、CoreS3が追加の本会話録音へ進む。
