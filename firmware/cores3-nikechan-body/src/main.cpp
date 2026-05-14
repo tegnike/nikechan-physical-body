@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Wire.h>
+#include "assets/face_images.h"
 #include "esp_heap_caps.h"
 #include "esp_camera.h"
 
@@ -60,6 +61,7 @@ uint32_t lastFaceMs = 0;
 uint32_t lastStatusMs = 0;
 uint32_t lastTouchMs = 0;
 uint32_t autonomousNextMs = 0;
+uint32_t lastMouthToggleMs = 0;
 String lastAction = "boot";
 String bridgeUrl = "http://192.168.4.2:8787";
 String wifiSsid;
@@ -67,6 +69,7 @@ String wifiPassword;
 String wakeWord = "ニケちゃん";
 String lastTranscript;
 String lastReply;
+bool mouthFrameOpen = false;
 
 struct WAVHeader {
   char riff[4] = {'R', 'I', 'F', 'F'};
@@ -178,28 +181,31 @@ void drawStatusBar() {
 }
 
 void drawFace() {
-  CoreS3.Display.fillRect(0, 30, 320, 150, kBg);
-  CoreS3.Display.fillRoundRect(70, 42, 180, 126, 36, kFace);
-  CoreS3.Display.fillCircle(118, 98, 16, kEye);
-  CoreS3.Display.fillCircle(202, 98, 16, kEye);
-  CoreS3.Display.fillCircle(123, 92, 5, kInk);
-  CoreS3.Display.fillCircle(207, 92, 5, kInk);
-  CoreS3.Display.fillCircle(102, 126, 12, kCheek);
-  CoreS3.Display.fillCircle(218, 126, 12, kCheek);
-  CoreS3.Display.drawArc(160, 122, 34, 18, 20, 160, kEye);
-
-  CoreS3.Display.setTextDatum(middle_center);
-  CoreS3.Display.setTextColor(kInk, kBg);
-  CoreS3.Display.drawString("Nikechan Body", 160, 190);
-  CoreS3.Display.drawString(lastAction, 160, 212);
-  if (lastReply.length() > 0) {
-    CoreS3.Display.drawString(lastReply.substring(0, 18), 160, 232);
-  } else {
-    CoreS3.Display.drawString("tap face to talk", 160, 232);
+  const uint32_t now = millis();
+  const bool speaking = CoreS3.Speaker.isPlaying() || wakeListening || lastAction == "listening" || lastAction == "wake checking";
+  if (speaking && now - lastMouthToggleMs > 180) {
+    lastMouthToggleMs = now;
+    mouthFrameOpen = !mouthFrameOpen;
+  }
+  if (!speaking) {
+    mouthFrameOpen = false;
   }
 
-  drawButton(8, 196, 58, 36, "CAM", cameraReady ? kAccent : kPanel);
-  drawButton(254, 196, 58, 36, "AUTO", autonomousEnabled ? kWarn : kPanel);
+  const bool eyesOpen = (now % 4200) >= 160;
+  const uint8_t* image = face_assets::kFaceEyeOnMouthOff;
+  size_t imageSize = face_assets::kFaceEyeOnMouthOffSize;
+  if (eyesOpen && mouthFrameOpen) {
+    image = face_assets::kFaceEyeOnMouthOn;
+    imageSize = face_assets::kFaceEyeOnMouthOnSize;
+  } else if (!eyesOpen && mouthFrameOpen) {
+    image = face_assets::kFaceEyeOffMouthOn;
+    imageSize = face_assets::kFaceEyeOffMouthOnSize;
+  } else if (!eyesOpen) {
+    image = face_assets::kFaceEyeOffMouthOff;
+    imageSize = face_assets::kFaceEyeOffMouthOffSize;
+  }
+
+  CoreS3.Display.drawJpg(image, imageSize, 0, 0);
 }
 
 void drawTouchPad() {
@@ -216,9 +222,7 @@ void renderFaceView(bool full) {
     CoreS3.Display.fillScreen(kBg);
     CoreS3.Display.setFont(&fonts::FreeSans9pt7b);
   }
-  drawStatusBar();
   drawFace();
-  drawTouchPad();
 }
 
 void renderCameraView() {
@@ -616,6 +620,10 @@ void playWavBuffer(uint8_t* audio, size_t audioSize) {
   CoreS3.Speaker.playWav(audio, audioSize, 1, 0, false);
   while (CoreS3.Speaker.isPlaying()) {
     CoreS3.update();
+    if (viewMode == ViewMode::Face && millis() - lastFaceMs > kFaceFrameMs) {
+      lastFaceMs = millis();
+      drawFace();
+    }
     delay(10);
   }
   CoreS3.Speaker.end();
